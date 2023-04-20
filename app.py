@@ -159,6 +159,7 @@ def parse_contents(contents, file_name):
     return ([html.Span("Shows channel-wise EEG signals for "), html.Strong(edf_info.file_name), html.Span(f" in {edf_info.chunk_in_time_text} interval")], '', '')
     
 app = Dash(__name__)
+app.title = "EEG Browser"
 edf_info, chunk_in_time_text = None, "30 sec"
 
 #edf_file_path = 'data/19-0261_F_9.3_1_di_al.edf'
