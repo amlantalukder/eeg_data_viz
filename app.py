@@ -8,7 +8,7 @@ from plotly_resampler import FigureResampler, FigureWidgetResampler
 '''
 import numpy as np
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime
 import mne
 import base64
 import io
@@ -22,7 +22,7 @@ class EDFInfo():
         self.eeg_data = eeg_data
         self.eeg_channels = self.eeg_data.info['ch_names']
         self.eeg_data_raw = self.eeg_data.get_data(picks=self.eeg_channels)
-        self.eeg_start_time =  pd.to_datetime(self.eeg_data.info['meas_date'])
+        self.eeg_start_time = pd.to_datetime(self.eeg_data.info['meas_date'])
         self.eeg_sampling_freq = float(self.eeg_data.info['sfreq'])
         self.df = pd.DataFrame(self.eeg_data_raw.T, columns=self.eeg_channels)
         self.df = self.df.reset_index()
@@ -30,9 +30,9 @@ class EDFInfo():
         self.epoch_index = 1
         self.window_time = 30
 
-        self.setWindowTime(30)
+        self.setExtractionInterval(30)
 
-    def setWindowTime(self, interval):
+    def setExtractionInterval(self, interval):
         
         if self.window_time != interval: self.epoch_index = 1
 
@@ -46,12 +46,41 @@ class EDFInfo():
         self.window = self.window_time * self.eeg_sampling_freq
         self.num_epochs = self.df.shape[0]//self.window + int(self.df.shape[0]%self.window > 0)
 
+    def setExtractionStartPoint(self, interval_start=None):
+
+        if interval_start is not None:
+            try:
+                hh, mm, ss = interval_start.split(":")
+                print(hh, mm, ss)
+                hh, mm, ss = int(hh), int(mm), int(ss)
+                
+                if 0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59:
+                    day = datetime.today()
+                    time1 = datetime.combine(day, pd.to_datetime(interval_start).time())
+                    time2 = datetime.combine(day, self.eeg_start_time.time())
+                    self.start_point = (time1-time2).total_seconds() * self.eeg_sampling_freq
+
+            except Exception as e:
+                print(f"Error: {e}")
+        else:
+            self.start_point = int(self.window * (self.epoch_index - 1))
+
+    def extractData(self):
+        df_current = self.df.loc[self.start_point : self.start_point + self.window].copy()
+        df_current['Time'] = df_current['Time'].apply(lambda x: self.eeg_start_time + timedelta(seconds=x/self.eeg_sampling_freq))
+        return df_current
+    
+    def hasPrevData(self):
+        return self.start_point > 0
+    
+    def hasNextData(self):
+        return (self.start_point + self.window) < self.df.shape[0]
+
 def processLayoutUpdate():
 
-    df_current = edf_info.df.loc[int(edf_info.window * (edf_info.epoch_index - 1)):int(edf_info.window * edf_info.epoch_index)].copy()
-    df_current['Time'] = df_current['Time'].apply(lambda x: edf_info.eeg_start_time + timedelta(seconds=x/edf_info.eeg_sampling_freq))
+    df_current = edf_info.extractData()
     df_current = df_current.melt(['Time']).rename(columns={'variable': 'Channel', 'value':'Amp'})
-    is_first_epoch, is_last_epoch = edf_info.epoch_index == 1, edf_info.epoch_index == edf_info.num_epochs-1
+    has_prev_data, has_next_data = edf_info.hasPrevData(), edf_info.hasNextData()
 
     fig = px.line(df_current, x="Time", y="Amp", color="Channel", facet_row="Channel", height=100*len(edf_info.eeg_channels))
     fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1], textangle=0))
@@ -87,7 +116,7 @@ def processLayoutUpdate():
         style={
             'width': '100%',
         }
-    ), f'< Previous {edf_info.window_time_text}', f'Next {edf_info.window_time_text} >', is_first_epoch, is_last_epoch
+    ), f'< Previous {edf_info.window_time_text}', f'Next {edf_info.window_time_text} >', (not has_prev_data), (not has_next_data)
 
 def parse_contents(contents, file_name):
 
@@ -103,7 +132,7 @@ def parse_contents(contents, file_name):
             eeg_data = mne.io.read_raw_edf(edf_file_path, encoding='latin1', verbose=False)
             edf_info = EDFInfo(file_name, eeg_data)
     except Exception as e:
-        print(e)
+        print(f"Error: {e}")
         return (f"Shows channel-wise EEG signals in {window_time_text} interval", "There was an error processing this file", '')
     return ([html.Span("Shows channel-wise EEG signals for "), html.Strong(edf_info.file_name), html.Span(f" in {edf_info.window_time_text} interval")], '', '')
     
@@ -168,13 +197,34 @@ app.layout = html.Div(
                                     "display": "flex",
                                     "alignItems": "center"
                                 }
+                            ),
+                            html.Div(
+                                children=[
+                                    html.Label('Show data from: '),
+                                    dcc.Input(
+                                        placeholder="hh:mm:ss",
+                                        type="text",
+                                        n_submit=0,
+                                        pattern=u"^[0-2][0-3]:[0-5][0-9]:[0-5][0-9]$",
+                                        style={
+                                            "width": "100px",
+                                            "textAlign": "center"
+                                        },
+                                        id="start-interval"
+                                    ),
+                                ],
+                                style={
+                                    "display": "flex",
+                                    "alignItems": "center"
+                                }
                             )
                         ],
                         style={
                             "flex": "1",
                             "display": "flex",
+                            "flexDirection": "column",
                             "alignItems": "end",
-                            "justifyContent": "end"
+                            "justifyContent": "space-around"
                         }
                     )
                 ],
@@ -289,7 +339,8 @@ app.layout = html.Div(
         Output('upload-status', 'children'),
         Output("loading-output1", "children"),
         Input('upload-data', 'contents'),
-        State('upload-data', 'filename')
+        State('upload-data', 'filename'),
+        prevent_initial_call=True
 )
 def upload_data(contents, file_name):
     return parse_contents(contents, file_name) if contents else (f"Shows channel-wise EEG signals in {(edf_info.window_time_text if edf_info else window_time_text)} interval", '', '')
@@ -304,14 +355,21 @@ def upload_data(contents, file_name):
     Input('prev-btn', 'n_clicks'),
     Input('next-btn', 'n_clicks'),
     Input('menu-interval', 'value'),
-    Input("loading-output1", "children")
+    Input('start-interval', 'n_submit'),
+    State('start-interval', 'value'),
+    Input("loading-output1", "children"), 
+    prevent_initial_call=True
 )
-def update_figure(prev_btn, next_btn, interval, temp):
+def update_figure(prev_btn, next_btn, interval, n_submit, interval_start, temp):
+    print(n_submit, ctx.triggered_id, prev_btn, next_btn, interval_start)
+
     if not edf_info: return '', f'< Previous {window_time_text}', f'Next {window_time_text} >', True, True, ''
-    if "prev-btn" == ctx.triggered_id and edf_info.epoch_index > 1: edf_info.epoch_index -= 1
-    elif "next-btn" == ctx.triggered_id and edf_info.epoch_index < edf_info.num_epochs-1: edf_info.epoch_index += 1
+
+    if ctx.triggered_id == "prev-btn" and edf_info.epoch_index > 1: edf_info.epoch_index -= 1
+    elif ctx.triggered_id == "next-btn" and edf_info.epoch_index < edf_info.num_epochs-1: edf_info.epoch_index += 1
     
-    edf_info.setWindowTime(interval)
+    edf_info.setExtractionInterval(interval)
+    edf_info.setExtractionStartPoint(interval_start)
     
     return *processLayoutUpdate(), ''
 
