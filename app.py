@@ -22,51 +22,64 @@ class EDFInfo():
         self.eeg_data = eeg_data
         self.eeg_channels = self.eeg_data.info['ch_names']
         self.eeg_data_raw = self.eeg_data.get_data(picks=self.eeg_channels)
-        self.eeg_start_time = pd.to_datetime(self.eeg_data.info['meas_date'])
+        self.eeg_start_time = pd.to_datetime(self.eeg_data.info['meas_date'] if 'meas_date' in self.eeg_data.info else datetime.today())
         self.eeg_sampling_freq = float(self.eeg_data.info['sfreq'])
         self.df = pd.DataFrame(self.eeg_data_raw.T, columns=self.eeg_channels)
         self.df = self.df.reset_index()
         self.df = self.df.rename(columns={'index': 'Time'})
-        self.epoch_index = 1
-        self.window_time = 30
+        self.chunk_in_sec = 30
 
-        self.setExtractionInterval(30)
+        self.setChunkStart(0)
+        self.setChunkSize(30)
 
-    def setExtractionInterval(self, interval):
+    def setChunkSize(self, interval):
         
-        if self.window_time != interval: self.epoch_index = 1
+        if self.chunk_in_sec != interval: self.setChunkStart(0)
 
-        self.window_time = interval
+        self.chunk_in_sec = interval
         
-        if interval == 300: self.window_time_text = '5 min'
-        elif interval == 600: self.window_time_text = '10 min'
+        if interval == 300: self.chunk_in_time_text = '5 min'
+        elif interval == 600: self.chunk_size_text = '10 min'
         else:
-            self.window_time_text = f'{interval} sec'
+            self.chunk_in_time_text = f'{interval} sec'
 
-        self.window = self.window_time * self.eeg_sampling_freq
-        self.num_epochs = self.df.shape[0]//self.window + int(self.df.shape[0]%self.window > 0)
+        self.chunk = self.chunk_in_sec * self.eeg_sampling_freq
 
-    def setExtractionStartPoint(self, interval_start=None):
+    def setChunkStartByTime(self, time_start):
 
-        if interval_start is not None:
-            try:
-                hh, mm, ss = interval_start.split(":")
-                print(hh, mm, ss)
-                hh, mm, ss = int(hh), int(mm), int(ss)
-                
-                if 0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59:
-                    day = datetime.today()
-                    time1 = datetime.combine(day, pd.to_datetime(interval_start).time())
-                    time2 = datetime.combine(day, self.eeg_start_time.time())
-                    self.start_point = (time1-time2).total_seconds() * self.eeg_sampling_freq
+        try:
+            hh, mm, ss = time_start.split(":")
+            hh, mm, ss = int(hh), int(mm), int(ss)
+            
+            if 0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59:
+                day = datetime.today()
+                time1 = datetime.combine(day, pd.to_datetime(time_start).time())
+                time2 = datetime.combine(day, self.eeg_start_time.time())
+                chunk_start = (time1-time2).total_seconds() * self.eeg_sampling_freq
 
-            except Exception as e:
-                print(f"Error: {e}")
-        else:
-            self.start_point = int(self.window * (self.epoch_index - 1))
+        except Exception as e:
+            print(f"Error: {e}")
+            return
+        
+        self.setChunkStart(chunk_start)
+
+    def setChunkStart(self, chunk_start):
+        self.start_point = chunk_start
+
+    def decChunk(self):
+        self.start_point = max(self.start_point-self.chunk, 0)
+
+    def incChunk(self):
+        self.start_point = min(self.start_point+self.chunk, self.df.shape[0]-self.chunk)
+
+    def firstChunk(self):
+        self.setChunkStart(0)
+
+    def lastChunk(self):
+        self.setChunkStart(self.df.shape[0]-self.chunk)
 
     def extractData(self):
-        df_current = self.df.loc[self.start_point : self.start_point + self.window].copy()
+        df_current = self.df.loc[self.start_point : self.start_point + self.chunk].copy()
         df_current['Time'] = df_current['Time'].apply(lambda x: self.eeg_start_time + timedelta(seconds=x/self.eeg_sampling_freq))
         return df_current
     
@@ -74,7 +87,7 @@ class EDFInfo():
         return self.start_point > 0
     
     def hasNextData(self):
-        return (self.start_point + self.window) < self.df.shape[0]
+        return (self.start_point + self.chunk) < self.df.shape[0]
 
 def processLayoutUpdate():
 
@@ -111,12 +124,21 @@ def processLayoutUpdate():
     fig.show_dash(mode='inline')
     '''
 
-    return dcc.Graph(
-        figure=fig,
-        style={
-            'width': '100%',
-        }
-    ), f'< Previous {edf_info.window_time_text}', f'Next {edf_info.window_time_text} >', (not has_prev_data), (not has_next_data)
+    return (
+        dcc.Graph(
+            figure=fig,
+            style={
+                'width': '100%',
+            }
+    ), 
+    f'< Previous {edf_info.chunk_in_time_text}', 
+    f'Next {edf_info.chunk_in_time_text} >', 
+    (not has_prev_data), 
+    (not has_next_data), 
+    f'First {edf_info.chunk_in_time_text}', 
+    f'Last {edf_info.chunk_in_time_text}', 
+    (not has_prev_data), 
+    (not has_next_data))
 
 def parse_contents(contents, file_name):
 
@@ -133,11 +155,11 @@ def parse_contents(contents, file_name):
             edf_info = EDFInfo(file_name, eeg_data)
     except Exception as e:
         print(f"Error: {e}")
-        return (f"Shows channel-wise EEG signals in {window_time_text} interval", "There was an error processing this file", '')
-    return ([html.Span("Shows channel-wise EEG signals for "), html.Strong(edf_info.file_name), html.Span(f" in {edf_info.window_time_text} interval")], '', '')
+        return (f"Shows channel-wise EEG signals in {chunk_in_time_text} interval", "There was an error processing this file", '')
+    return ([html.Span("Shows channel-wise EEG signals for "), html.Strong(edf_info.file_name), html.Span(f" in {edf_info.chunk_in_time_text} interval")], '', '')
     
 app = Dash(__name__)
-edf_info, window_time_text = None, "30 sec"
+edf_info, chunk_in_time_text = None, "30 sec"
 
 #edf_file_path = 'data/19-0261_F_9.3_1_di_al.edf'
 #eeg_data = mne.io.read_raw_edf(edf_file_path, verbose=False)
@@ -162,7 +184,7 @@ app.layout = html.Div(
                                 }
                             ),
                             html.P(
-                                children=f'Shows EEG signals for selected channels in {window_time_text} interval',
+                                children=f'Shows EEG signals for selected channels in {chunk_in_time_text} interval',
                                 style = {
                                     'textAlign': 'center',
                                 },
@@ -277,7 +299,18 @@ app.layout = html.Div(
             html.Div(
                 children=[
                     html.Button(
-                        children=f'< Previous {window_time_text}', 
+                        children=f'First {chunk_in_time_text}', 
+                        id='first-btn', 
+                        n_clicks=0,
+                        disabled=True, 
+                        style={
+                            'height': '50px',
+                            'cursor': 'pointer'
+                        }
+                    ),
+                    
+                    html.Button(
+                        children=f'< Previous {chunk_in_time_text}', 
                         id='prev-btn', 
                         n_clicks=0,
                         disabled=True, 
@@ -296,7 +329,7 @@ app.layout = html.Div(
                     ),
 
                     html.Button(
-                        children=f'Next {window_time_text} >', 
+                        children=f'Next {chunk_in_time_text} >', 
                         id='next-btn', 
                         n_clicks=0,
                         disabled=True, 
@@ -304,7 +337,18 @@ app.layout = html.Div(
                             'height': '50px',
                             'cursor': 'pointer'
                         }
-                    )
+                    ),
+
+                    html.Button(
+                        children=f'Last {chunk_in_time_text}', 
+                        id='last-btn', 
+                        n_clicks=0,
+                        disabled=True, 
+                        style={
+                            'height': '50px',
+                            'cursor': 'pointer'
+                        }
+                    ),
                 ], 
                 style={
                     'display': 'flex', 
@@ -343,7 +387,7 @@ app.layout = html.Div(
         prevent_initial_call=True
 )
 def upload_data(contents, file_name):
-    return parse_contents(contents, file_name) if contents else (f"Shows channel-wise EEG signals in {(edf_info.window_time_text if edf_info else window_time_text)} interval", '', '')
+    return parse_contents(contents, file_name) if contents else (f"Shows channel-wise EEG signals in {(edf_info.chunk_in_time_text if edf_info else chunk_in_time_text)} interval", '', '')
 
 @app.callback(
     Output('eeg-graph-container', 'children'),
@@ -351,25 +395,32 @@ def upload_data(contents, file_name):
     Output('next-btn', 'children'),
     Output('prev-btn', 'disabled'),
     Output('next-btn', 'disabled'),
+    Output('first-btn', 'children'),
+    Output('last-btn', 'children'),
+    Output('first-btn', 'disabled'),
+    Output('last-btn', 'disabled'),
     Output("loading-output", "children"),
     Input('prev-btn', 'n_clicks'),
     Input('next-btn', 'n_clicks'),
+    Input('first-btn', 'n_clicks'),
+    Input('last-btn', 'n_clicks'),
     Input('menu-interval', 'value'),
     Input('start-interval', 'n_submit'),
     State('start-interval', 'value'),
     Input("loading-output1", "children"), 
     prevent_initial_call=True
 )
-def update_figure(prev_btn, next_btn, interval, n_submit, interval_start, temp):
-    print(n_submit, ctx.triggered_id, prev_btn, next_btn, interval_start)
+def update_figure(prev_btn, next_btn, first_btn, last_btn, interval, n_submit, interval_start, temp):
 
-    if not edf_info: return '', f'< Previous {window_time_text}', f'Next {window_time_text} >', True, True, ''
+    if not edf_info: return '', f'< Previous {chunk_in_time_text}', f'Next {chunk_in_time_text} >', True, True, True, True, ''
 
-    if ctx.triggered_id == "prev-btn" and edf_info.epoch_index > 1: edf_info.epoch_index -= 1
-    elif ctx.triggered_id == "next-btn" and edf_info.epoch_index < edf_info.num_epochs-1: edf_info.epoch_index += 1
+    if ctx.triggered_id == "prev-btn": edf_info.decChunk()
+    elif ctx.triggered_id == "next-btn": edf_info.incChunk()
+    elif ctx.triggered_id == "first-btn": edf_info.firstChunk()
+    elif ctx.triggered_id == "last-btn": edf_info.lastChunk()
     
-    edf_info.setExtractionInterval(interval)
-    edf_info.setExtractionStartPoint(interval_start)
+    if interval: edf_info.setChunkSize(interval)
+    if ctx.triggered_id == "start-interval" and interval_start: edf_info.setChunkStartByTime(interval_start)
     
     return *processLayoutUpdate(), ''
 
