@@ -103,7 +103,7 @@ def processLayoutUpdate():
     fig['layout']['xaxis8']['showticklabels'] = True
     fig['layout']['xaxis8']['side'] = 'top'
     fig.add_annotation(x=-0.03,y=0.5, text="Amplitude (db)", textangle=-90, xref="paper", yref="paper")
-    fig.update_layout(showlegend=False)
+    fig.update_layout(showlegend=False, font={'family':'Times New Roman'})
     
     '''    
     fig = make_subplots(rows=len(eeg_channels), cols=1,                        shared_xaxes=True,
@@ -352,6 +352,7 @@ app.layout = html.Div(
                     'height': '80%',
                     'display': 'flex', 
                     'alignItems': 'center',
+                    'font-family': 'inherit !important'
                 },
                 id='eeg-graph-container'
             ),
