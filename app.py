@@ -269,7 +269,6 @@ app.layout = html.Div(
                             )
                         ], 
                         style={
-                            'width': '99%',
                             'height': '60px',
                             'lineHeight': '60px',
                             'borderWidth': '1px',
@@ -303,10 +302,7 @@ app.layout = html.Div(
                         id='first-btn', 
                         n_clicks=0,
                         disabled=True, 
-                        style={
-                            'height': '50px',
-                            'cursor': 'pointer'
-                        }
+                        className='button'
                     ),
                     
                     html.Button(
@@ -314,10 +310,7 @@ app.layout = html.Div(
                         id='prev-btn', 
                         n_clicks=0,
                         disabled=True, 
-                        style={
-                            'height': '50px',
-                            'cursor': 'pointer'
-                        }
+                        className='button'
                     ),
 
                     dcc.Loading(
@@ -333,10 +326,7 @@ app.layout = html.Div(
                         id='next-btn', 
                         n_clicks=0,
                         disabled=True, 
-                        style={
-                            'height': '50px',
-                            'cursor': 'pointer'
-                        }
+                        className='button'
                     ),
 
                     html.Button(
@@ -344,10 +334,7 @@ app.layout = html.Div(
                         id='last-btn', 
                         n_clicks=0,
                         disabled=True, 
-                        style={
-                            'height': '50px',
-                            'cursor': 'pointer'
-                        }
+                        className='button'
                     ),
                 ], 
                 style={
