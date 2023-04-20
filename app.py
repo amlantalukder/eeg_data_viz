@@ -38,8 +38,8 @@ class EDFInfo():
 
         self.chunk_in_sec = interval
         
-        if interval == 300: self.chunk_in_time_text = '5 min'
-        elif interval == 600: self.chunk_size_text = '10 min'
+        if interval == 60: self.chunk_in_time_text = '1 min'
+        elif interval == 300: self.chunk_size_text = '5 min'
         else:
             self.chunk_in_time_text = f'{interval} sec'
 
@@ -203,8 +203,8 @@ app.layout = html.Div(
                                     dcc.Dropdown(
                                         options=[
                                             {'label': '30 sec', 'value': 30},
+                                            {'label': '1 min', 'value': 60},
                                             {'label': '5 min', 'value': 300},
-                                            {'label': '10 min', 'value': 600},
                                         ],
                                         value=30,
                                         clearable=False,
@@ -414,4 +414,4 @@ def update_figure(prev_btn, next_btn, first_btn, last_btn, interval, n_submit, i
 
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
